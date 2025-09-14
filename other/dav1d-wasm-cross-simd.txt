@@ -1,0 +1,25 @@
+[binaries]
+c = 'emcc'
+ar = 'emar'
+strip = 'emstrip'
+install_name_tool = 'echo'
+#exe_wrapper = 'node'
+# disable exe_wrapper for the "sanity check" file which is an .exe so doesn't get made as JS/wasm
+exe_wrapper = 'echo'
+
+[built-in options]
+c_args = ['-pthread', '-O3', '-flto', '-msimd128', '-DNDEBUG']
+c_link_args = ['-pthread', '-O3', '-flto']
+
+# For debugging / profiling:
+# c_args = ['-pthread', '-O3', '-flto', '-msimd128', '-DNDEBUG', '--profiling']
+# c_link_args = ['-pthread', '-O3', '-flto', '--profiling', '-gsource-map', '--source-map-base', 'https://localhost/']
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'linux'
+cpu_family = 'wasm32'
+cpu = 'wasm32'
+endian = 'little'

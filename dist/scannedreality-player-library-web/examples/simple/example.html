@@ -1,0 +1,268 @@
+<!doctype html>
+<html>
+
+<!-- Define a basic webpage as an example -->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>ScannedReality Library - Simple JavaScript / WebGL Example</title>
+</head>
+
+<body>
+  <div style="margin: auto; width: 600px;">
+    <h3 style="text-align: center;">ScannedReality Library - Simple JavaScript / WebGL Example</h3>
+    
+    <!-- The 3D content will be shown in this canvas: -->
+    <canvas id="canvas" style="width: 600px; height: 400px;"></canvas>
+  </div>
+</body>
+
+<!-- Include the ScannedReality player JavaScript API -->
+<script src="../../lib/scannedreality-player-api.js"></script>
+
+<!--
+Include some 3D math helper functions, taken from:
+
+  https://github.com/gfxfundamentals/webgl-fundamentals
+
+These are only used by the example code below and are not required
+for the player library to work. You may remove them when integrating
+the player library with your own code.
+-->
+<script src="../../util/m4.js"></script>
+
+<script>
+"use strict";
+
+/**
+ * Helper function resizeCanvasToDisplaySize(), taken from:
+ * 
+ *   https://github.com/greggman/twgl.js
+ * 
+ * License:
+ * ####################################################################
+ * Copyright 2019 Gregg Tavares
+ * 
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without restriction,
+ * including without limitation the rights to use, copy, modify, merge,
+ * publish, distribute, sublicense, and/or sell copies of the Software,
+ * and to permit persons to whom the Software is furnished to do so,
+ * subject to the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ * ####################################################################
+ */
+/**
+ * Resize a canvas to match the size it's displayed.
+ * @param {HTMLCanvasElement} canvas The canvas to resize.
+ * @param {number} [multiplier] So you can pass in `window.devicePixelRatio` or other scale value if you want to.
+ * @return {boolean} true if the canvas was resized.
+ * @memberOf module:twgl
+ */
+function resizeCanvasToDisplaySize(canvas, multiplier) {
+  multiplier = multiplier || 1;
+  multiplier = Math.max(0, multiplier);
+  const width  = canvas.clientWidth  * multiplier | 0;
+  const height = canvas.clientHeight * multiplier | 0;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+    return true;
+  }
+  return false;
+}
+
+// Converts degrees to radians
+function degToRad(d) {
+  return d * Math.PI / 180;
+}
+
+// The video and related objects
+var videoCommonResources = null;
+var video = null;
+var lastDrawTime = NaN;
+
+// Main function of example
+function main() {
+  // Create a WebGL 2 context
+  var canvas = document.getElementById("canvas");
+  var gl = canvas.getContext("webgl2");
+  if (!gl) {
+    alert("Failed to create WebGL 2 context");
+    return;
+  }
+  
+  // Initialize the ScannedReality player module once at the start,
+  // providing the URI to the "lib" directory (this must end with a slash if non-empty).
+  // This call returns a promise that resolves to the loaded player module on success.
+  // Once we receive that, we call initScene().
+  scannedreality.initialize("../../lib/", canvas)
+    .then((playerModule) => {
+      initScene(playerModule);
+    })
+    .catch((error) => {
+      alert('Failed to initialize player: ' + error);
+    });
+  
+  // Initializes the scene
+  function initScene(playerModule) {
+    // Initialize common resources (shaders, etc.) for XRVideo files once at the start.
+    videoCommonResources = scannedreality.newVideoCommonResources(playerModule);
+    if (!videoCommonResources.isInitialized()) {
+      alert("Failed to initialize common video resources");
+      return;
+    }
+    
+    // Initialize an XRVideo object, passing in the common resources allocated above.
+    // cachedDecodedFrameCount determines how many decoded video frames will remain cached,
+    // which greatly influences the memory requirements. Passing 0 for cachedDecodedFrameCount
+    // will lead to all frames in the video being cached. This is only appropriate for very
+    // short video clips. See the documentation comment on newVideo() in
+    // lib/scannedreality-player-api.js for more details. Note that for iOS / Safari, we limit
+    // the maximum WebAssembly memory used to 1GB, as larger maximum sizes seem to be rejected by these.
+    // Thus, please make sure not to use too much memory when targeting these.
+    video = scannedreality.newVideo(/*cachedDecodedFrameCount*/ 60, /*verboseDecoding*/ false, videoCommonResources);
+    if (!video.isInitialized()) {
+      alert("Failed to initialize the video");
+      return;
+    }
+    
+    // Fetch and load the XRVideo file asynchronously.
+    fetchAndLoadVideo();
+  }
+
+  // Fetches the video file and loads it into the video object
+  function fetchAndLoadVideo() {
+    // ( Documentation on fetch(): https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch )
+    window.fetch("../../example_videos/example1.xrv", {cache: "no-store"})
+      .then((response) => {
+        if (!response.ok) {
+          alert('Failed to fetch video file: Network response was not OK');
+        }
+        return response.arrayBuffer();
+      })
+      .then((videoBuffer) => {
+        // Load the video from the fetched buffer, and set the initial playback mode.
+        // Note that load() returns immediately; the video frames will subsequently be
+        // asynchronously decoded in the background.
+        video.load(videoBuffer, scannedreality.XRVideoPlaybackMode.Loop);
+      })
+      .catch((error) => {
+        alert('Failed to fetch video file:' + error);
+      });
+  }
+  
+  // Function that draws the scene, called for each displayed frame
+  function drawScene(time) {
+    // Convert the current time to seconds
+    time *= 0.001;
+    
+    // Make sure that the canvas size remains sane after resizing
+    resizeCanvasToDisplaySize(canvas, window.devicePixelRatio ? window.devicePixelRatio : 1);
+    
+    // Set the viewport to match the canvas
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    
+    // Clear the color and depth buffer
+    gl.clearColor(0.2, 0.2, 0.2, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    
+    // Define our desired projection matrix
+    var fieldOfViewRadians = degToRad(40);
+    var aspect = canvas.clientWidth / canvas.clientHeight;
+    var projectionMatrix = m4.perspective(fieldOfViewRadians, aspect, 0.1, 100);
+    
+    // Define our desired camera matrix.
+    // Note that at the time of writing, there is no designated "forward direction" for
+    // ScannedReality videos yet, although this may be defined in the future.
+    var cameraPosition = [-1.7, 1, -2.5];
+    var target = [0, 0.8, 0];
+    var up = [0, 1, 0];
+    var cameraMatrix = m4.lookAt(cameraPosition, target, up);
+    var viewMatrix = m4.inverse(cameraMatrix);
+    
+    // Define the desired model matrix for the ScannedReality video
+    var modelMatrix = m4.identity();
+    
+    // Combine the model, view, and projection matrices
+    var modelViewMatrix = m4.multiply(viewMatrix, modelMatrix);
+    var modelViewProjectionMatrix = m4.multiply(projectionMatrix, modelViewMatrix);
+    
+    // Has the video file been provided to the video object yet?
+    if (video !== null && video.isLoaded()) {
+      // Advance the video playback (unless we want the video to pause),
+      // passing in the elapsed time in seconds since the last call to drawScene().
+      // 
+      // Note that this function implicitly discards the update
+      // if the video is currently in the "buffering" state, meaning that not enough video frames
+      // have been decoded in the background yet to allow for starting playback, to allow
+      // for the video frame decoding to catch up.
+      video.update(!Number.isNaN(lastDrawTime) ? (time - lastDrawTime) : 0);
+      
+      // Prepare rendering the current timestamp of the video,
+      // retrieving a render lock for use with render().
+      // This may do offscreen rendering to perform computations on the GPU, therefore the
+      // OpenGL render target states (framebuffer, viewport, ...) must be reset after calling this!
+      var renderLock = video.prepareRenderLock();
+      
+      // Reset viewport after prepareRenderLock().
+      // If not using the default framebuffer, it must be reset as well.
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      
+      // Render the current video frame.
+      // Note: After video.isLoaded() starts returning true, for a short period of time it
+      // can happen that nothing will be rendered by the call below yet. This is because the first
+      // video frame may still need to be decoded (which happens in the background).
+      // You may call video.switchedToMostRecentVideo() to determine whether a frame of the most
+      // recently loaded video can be displayed.
+      video.render(modelViewMatrix, modelViewProjectionMatrix, /*useSurfaceNormalShading*/ false, renderLock);
+      
+      // After rendering, destroy the render lock.
+      video.destroyRenderLock(renderLock);
+      
+      // Note that video.prepareRenderLock() and video.render() may have changed OpenGL state.
+      // The following is a list of states to consider resetting to known values after these
+      // function calls, if desired. There is currently no guarantee for the list to be complete
+      // or remain constant over updates to the library.
+      // - glEnable / glDisable (GL_DEPTH_TEST)
+      // - glEnable / glDisable (GL_CULL_FACE)
+      // - glActiveTexture()
+      // - glBindTexture(GL_TEXTURE_2D) for texture units GL_TEXTURE0 + {0, 1, 2, 3}
+      // - glBindBuffer(GL_ARRAY_BUFFER)
+      // - glBindBuffer(GL_ELEMENT_ARRAY_BUFFER)
+      // - glUseProgram()
+    } else {
+      // The video has not been loaded yet.
+      // A loading indicator could be displayed here meanwhile.
+    }
+    
+    // Remember the timestamp of this call to drawScene() such that we will be able to
+    // compute the elapsed time when it is called the next time.
+    lastDrawTime = time;
+    
+    // Request the next animation frame, which will call drawScene() again.
+    window.requestAnimationFrame(drawScene);
+  }
+  
+  // Request the first animation frame, which will call drawScene().
+  window.requestAnimationFrame(drawScene);
+}
+
+// Start the main loop
+main();
+
+</script>
+
+</html>

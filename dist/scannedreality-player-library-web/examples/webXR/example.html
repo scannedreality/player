@@ -1,0 +1,422 @@
+<!doctype html>
+<!--
+This example is based on the "Barebones AR" example from immersive-web.github.io,
+which has the following license:
+-->
+<!--
+Copyright 2020 The Immersive Web Community Group
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-->
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1, user-scalable=no'>
+    <meta name='mobile-web-app-capable' content='yes'>
+    <meta name='apple-mobile-web-app-capable' content='yes'>
+
+    <style>
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: sans-serif;
+}
+
+body {
+  background-color: #ffffff;
+  color: #444444;
+}
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  
+  position: absolute;
+  width: 100%;
+  min-height: 100%;
+  top: 0;
+  
+  text-align: center;
+}
+
+.xr-button {
+  font-family: sans-serif;
+  border: rgb(80, 168, 252) 2px solid;
+  border-radius: 2px;
+  box-sizing: border-box;
+  background: none;
+  height: 55px;
+  min-width: 176px;
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+  font-size: 18px;
+  color: rgb(80, 168, 252);
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+canvas {
+  position: absolute;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  touch-action: none;
+}
+    </style>
+
+    <title>ScannedReality - WebXR Demo</title>
+  </head>
+  <body>
+    <canvas id="canvas" style="display: none;"></canvas>
+
+    <div class="wrapper">
+      <h2 style="margin-top: 0em;">ScannedReality WebXR Demo</h2>
+      <div id="warning" style="margin-bottom: 1em; color: #ca0000;"></div>
+      <button id="ar-button" class="xr-button" style="margin-bottom: 1em; display: none;" disabled>WebXR not available</button>
+      <button id="vr-button" class="xr-button" style="display: none;" disabled>WebXR not available</button>
+    </div>
+
+    <!-- Include the ScannedReality player JavaScript API -->
+    <script src="../../lib/scannedreality-player-api.js"></script>
+
+    <!--
+    Include some 3D math helper functions, taken from:
+
+      https://github.com/gfxfundamentals/webgl-fundamentals
+
+    These are only used by the example code below and are not required
+    for the player library to work. You may remove them when integrating
+    the player library with your own code.
+    -->
+    <script src="../../util/m4.js"></script>
+
+    <!-- WebXR example JavaScript code -->
+    <script type="module">
+// DOM elements
+let canvas = document.getElementById('canvas');
+let warning = document.getElementById("warning");
+let arButton = document.getElementById('ar-button');
+let vrButton = document.getElementById('vr-button');
+
+// XR globals
+const kARSessionType = 'immersive-ar';
+const kVRSessionType = 'immersive-vr';
+
+let xrSession = null;
+let xrSessionType = null;
+let xrRefSpace = null;
+
+// WebGL globals
+let gl = null;
+
+// The video and related objects
+let scannedRealityPlayer = null;
+let videoCommonResources = null;
+let video = null;
+let modelMatrix = null;
+let lastDrawSeconds = NaN;
+
+function initXR() {
+  if (!window.isSecureContext) {
+    warning.innerText = "WebXR is unavailable since the page is not served in a secure context.";
+  } else if (navigator.xr) {
+    warning.style.display = "none";
+
+    arButton.addEventListener('click', () => { onXRButtonClicked(arButton, kARSessionType); });
+    vrButton.addEventListener('click', () => { onXRButtonClicked(vrButton, kVRSessionType); });
+
+    navigator.xr.addEventListener('devicechange', checkForARAndVRSupport);
+    checkForARAndVRSupport();
+  } else {
+    warning.innerText = "Your browser does not support WebXR.";
+  }
+}
+
+function checkForARAndVRSupport() {
+  checkForXRSupport(kARSessionType, 'AR', arButton);
+  checkForXRSupport(kVRSessionType, 'VR', vrButton);
+}
+
+function checkForXRSupport(sessionType, name, button) {
+  navigator.xr.isSessionSupported(sessionType).then((supported) => {
+    if (supported) {
+      button.innerText = 'Enter ' + name;
+    } else {
+      button.innerText = name + ' via WebXR not available';
+    }
+
+    button.disabled = !supported;
+    button.style.display = "block";
+  });
+}
+
+function onXRButtonClicked(button, sessionType) {
+  if (!xrSession) {
+    button.innerText = "Starting ...";
+    button.disabled = true;
+
+    if (!scannedRealityPlayer) {
+      initGLAndPlayer(() => { startSession(sessionType); });
+    } else {
+      startSession(sessionType);
+    }
+  } else {
+    xrSession.end();
+  }
+}
+
+function initGLAndPlayer(next) {
+  // Make sure to allocate an XR compatible WebGL context before the
+  // ScannedReality plugin may allocate a non-compatible context.
+  // As an alternative to this, makeXRCompatible() could be called on the context later.
+  gl = canvas.getContext('webgl2', { xrCompatible: true });
+
+  // Initialize the ScannedReality player module,
+  // providing the URI to the "lib" directory (this must end with a slash if non-empty).
+  // This call returns a promise that resolves to the loaded player module on success.
+  scannedreality.initialize("../../lib/", canvas)
+    .then((playerModule) => {
+      scannedRealityPlayer = playerModule;
+
+      // Initialize common resources (shaders, etc.) for XRVideo files once at the start.
+      videoCommonResources = scannedreality.newVideoCommonResources(playerModule);
+      if (!videoCommonResources.isInitialized()) {
+        alert("Failed to initialize common video resources");
+        return;
+      }
+
+      // Initialize an XRVideo object, passing in the common resources allocated above.
+      // cachedDecodedFrameCount determines how many decoded video frames will remain cached,
+      // which greatly influences the memory requirements. Passing 0 for cachedDecodedFrameCount
+      // will lead to all frames in the video being cached. This is only appropriate for very
+      // short video clips. See the documentation comment on newVideo() in
+      // lib/scannedreality-player-api.js for more details. Note that for iOS / Safari, we limit
+      // the maximum WebAssembly memory used to 1GB, as larger maximum sizes seem to be rejected by these.
+      // Thus, please make sure not to use too much memory when targeting these.
+      video = scannedreality.newVideo(/*cachedDecodedFrameCount*/ 40, /*verboseDecoding*/ false, videoCommonResources);
+      if (!video.isInitialized()) {
+        alert("Failed to initialize the video");
+        return;
+      }
+
+      // Fetch and load the XRVideo file asynchronously.
+      // ( Documentation on fetch(): https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch )
+      window.fetch("../../example_videos/example1.xrv", {cache: "no-store"})
+        .then((response) => {
+          if (!response.ok) {
+            alert('Failed to fetch video file: Network response was not OK');
+          }
+          return response.arrayBuffer();
+        })
+        .then((videoBuffer) => {
+          // Load the video from the fetched buffer, and set the initial playback mode.
+          // Note that load() returns immediately; the video frames will subsequently be
+          // asynchronously decoded in the background.
+          video.load(videoBuffer, scannedreality.XRVideoPlaybackMode.Loop);
+        })
+        .catch((error) => {
+          alert('Failed to fetch video file:' + error);
+        });
+
+      next();
+    })
+    .catch((error) => {
+      alert('Failed to initialize player: ' + error);
+    });
+}
+
+function startSession(sessionType) {
+  // Note that local-floor is always supported for immersive sessions.
+  navigator.xr.requestSession(sessionType, {
+    requiredFeatures: ["local-floor"],
+  }).then((session) => { onSessionStarted(sessionType, session); }, onRequestSessionError);
+}
+
+function onSessionStarted(sessionType, session) {
+  xrSessionType = sessionType;
+  xrSession = session;
+
+  if (xrSessionType == kARSessionType) {
+    arButton.innerText = 'Exit AR';
+    arButton.disabled = false;
+  } else {
+    vrButton.innerText = 'Exit VR';
+    vrButton.disabled = false;
+  }
+
+  session.addEventListener('end', onSessionEnded);
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  session.requestReferenceSpace('local-floor').then((refSpace) => {
+    xrRefSpace = refSpace;
+
+    modelMatrix = null;
+    lastDrawSeconds = NaN;
+
+    session.requestAnimationFrame(onXRFrame);
+  });
+}
+
+function onRequestSessionError(ex) {
+  alert("Failed to start immersive session. If you use an Android device, then you may need to install 'Google Play Services for AR' from Play Store or from an alternative app marketplace to get AR support. Error message: " + ex.message);
+
+  arButton.disabled = false;
+  vrButton.disabled = false;
+}
+
+function onEndSession(session) {
+  session.end();
+}
+
+function onSessionEnded(event) {
+  xrSession = null;
+  if (xrSessionType == kARSessionType) {
+    arButton.innerText = 'Enter AR';
+  } else {
+    vrButton.innerText = 'Enter VR';
+  }
+}
+
+function onXRFrame(time, frame) {
+  let session = frame.session;
+  session.requestAnimationFrame(onXRFrame);
+
+  // Keep track of the elapsed time (in seconds)
+  let seconds = 0.001 * time;
+  let elapsedSeconds = seconds - lastDrawSeconds;
+  lastDrawSeconds = seconds;
+
+  // Has the video file been provided to the video object yet?
+  // If so, update the video decoding / playback.
+  let haveVideo = video !== null && video.isLoaded();
+
+  if (haveVideo) {
+    // Advance the video playback (unless we want the video to pause),
+    // passing in the elapsed time in seconds since the last call to drawScene().
+    // 
+    // Note that this function implicitly discards the update
+    // if the video is currently in the "buffering" state, meaning that not enough video frames
+    // have been decoded in the background yet to allow for starting playback, to allow
+    // for the video frame decoding to catch up.
+    video.update(!Number.isNaN(elapsedSeconds) ? elapsedSeconds : 0);
+  }
+
+  // Do we have a pose for XR rendering?
+  const pose = frame.getViewerPose(xrRefSpace);
+
+  if (pose) {
+    // Define the desired model matrix for the ScannedReality video:
+    // The first time that we get a pose, place the XRVideo on the floor (y = 0 with local-floor), 1.5 meters in front of the user.
+    if (!modelMatrix) {
+      const distance = 1.5;
+      const height = 0;
+      const baseAngle = 2.5;
+
+      let forward = new Float32Array(3);
+      forward[0] = 0;
+      forward[1] = 0;
+      forward[2] = -1;
+
+      m4.transformDirection(pose.transform.matrix, forward, forward);
+      forward[1] = 0;
+      m4.normalize(forward, forward);
+      m4.scaleVector(forward, distance, forward);
+
+      let pos = pose.transform.position;
+      let p = new Float32Array(3);
+      p[0] = pos.x;
+      p[1] = pos.y;
+      p[2] = pos.z;
+
+      m4.addVectors(p, forward, p);
+
+      let angle = Math.atan2(forward[2], forward[0]) + Math.PI / 2;
+      modelMatrix = m4.yRotate(m4.translation(p[0], height, p[2]), baseAngle - angle);
+    }
+
+    // Prepare rendering the current timestamp of the video,
+    // retrieving a render lock for use with render().
+    // This may do offscreen rendering to perform computations on the GPU, therefore the
+    // OpenGL render target states (framebuffer, viewport, ...) must be reset after calling this!
+    var renderLock = haveVideo ? video.prepareRenderLock() : null;
+
+    // Reset framebuffer after prepareRenderLock().
+    // We render into session.renderState.baseLayer.
+    const layer = session.renderState.baseLayer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+
+    // In AR, use a transparent clear color.
+    gl.clearColor(0, 0, 0, (xrSessionType == kARSessionType) ? 0.0 : 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Render all views.
+    // TODO: Add support for simultaneous multi-view rendering into two views.
+    for (let view of pose.views) {
+      // Set the viewport
+      const vp = layer.getViewport(view);
+      gl.viewport(vp.x, vp.y, vp.width, vp.height);
+
+      // Combine the model, view, and projection matrices
+      let viewMatrix = view.transform.inverse.matrix;
+      let projectionMatrix = view.projectionMatrix;
+
+      let modelViewMatrix = m4.multiply(viewMatrix, modelMatrix);
+      let modelViewProjectionMatrix = m4.multiply(projectionMatrix, modelViewMatrix);
+
+      // Render the current video frame.
+      // Note: After video.isLoaded() starts returning true, for a short period of time it
+      // can happen that nothing will be rendered by the call below yet. This is because the first
+      // video frame may still need to be decoded (which happens in the background).
+      // You may call video.switchedToMostRecentVideo() to determine whether a frame of the most
+      // recently loaded video can be displayed.
+      if (renderLock) {
+        video.render(modelViewMatrix, modelViewProjectionMatrix, /*useSurfaceNormalShading*/ false, renderLock);
+      }
+
+      // Note that video.prepareRenderLock() and video.render() may have changed OpenGL state.
+      // The following is a list of states to consider resetting to known values after these
+      // function calls, if desired. There is currently no guarantee for the list to be complete
+      // or remain constant over updates to the library.
+      // - glEnable / glDisable (GL_DEPTH_TEST)
+      // - glEnable / glDisable (GL_CULL_FACE)
+      // - glActiveTexture()
+      // - glBindTexture(GL_TEXTURE_2D) for texture units GL_TEXTURE0 + {0, 1, 2, 3}
+      // - glBindBuffer(GL_ARRAY_BUFFER)
+      // - glBindBuffer(GL_ELEMENT_ARRAY_BUFFER)
+      // - glUseProgram()
+    }
+
+    // After rendering all views, destroy the render lock.
+    if (renderLock) {
+      video.destroyRenderLock(renderLock);
+    }
+  }
+}
+
+initXR();
+    </script>
+  </body>
+</html>

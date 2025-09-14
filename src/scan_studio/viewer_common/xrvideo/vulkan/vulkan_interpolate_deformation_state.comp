@@ -1,0 +1,22 @@
+#version 460
+
+layout(local_size_x_id = 0) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer State1 { float state1[]; };
+layout(set = 0, binding = 1, std430) readonly buffer State2 { float state2[]; };
+layout(set = 0, binding = 2, std430) writeonly buffer Output { float outputState[]; };
+layout(push_constant) uniform PushConstant {
+  // Interpolation factor in the range [0, 1].
+  float factor;
+  
+  // 12 * nodeCount
+  uint coefficientCount;
+} pc;
+
+void main() {
+  if (gl_GlobalInvocationID.x < pc.coefficientCount) {
+    outputState[gl_GlobalInvocationID.x] =
+        (1.0 - pc.factor) * state1[gl_GlobalInvocationID.x] +
+        pc.factor * state2[gl_GlobalInvocationID.x];
+  }
+}

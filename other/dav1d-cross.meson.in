@@ -1,0 +1,25 @@
+[binaries]
+c = '${CMAKE_C_COMPILER}'
+cpp = '${CMAKE_CXX_COMPILER}'
+ar = '${CMAKE_AR}'
+strip = '${CMAKE_STRIP}'
+pkgconfig = 'pkg-config'
+windres = 'windres'
+
+[built-in options]
+# for multithreading, add: '-s', 'USE_PTHREADS=1'
+c_args = ['${MESON_C_FLAGS}']
+c_link_args = ['${MESON_C_FLAGS}']
+cpp_args = ['${MESON_C_FLAGS}']
+cpp_link_args = ['${MESON_C_FLAGS}']
+objc_args = ['${MESON_C_FLAGS}']
+objcpp_args = ['${MESON_C_FLAGS}']
+
+[properties]
+needs_exe_wrapper = true
+
+[host_machine]
+system = '${MESON_SYSTEM}'
+cpu_family = '${MESON_CPU_FAMILY}'
+endian = 'little'
+cpu = '${MESON_CPU}'

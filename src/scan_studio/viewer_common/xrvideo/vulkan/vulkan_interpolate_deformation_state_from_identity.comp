@@ -1,0 +1,24 @@
+#version 460
+
+layout(local_size_x_id = 0) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer State { float state[]; };
+layout(set = 0, binding = 1, std430) writeonly buffer Output { float outputState[]; };
+layout(push_constant) uniform PushConstant {
+  // Interpolation factor in the range [0, 1].
+  float factor;
+  
+  // 12 * nodeCount
+  uint coefficientCount;
+} pc;
+
+void main() {
+  if (gl_GlobalInvocationID.x < pc.coefficientCount) {
+    uint coefficientIndex = gl_GlobalInvocationID.x % 12;
+    float identityCoefficient = (coefficientIndex == 0 || coefficientIndex == 4 || coefficientIndex == 8) ? 1.0 : 0.0;
+    
+    outputState[gl_GlobalInvocationID.x] =
+        (1.0 - pc.factor) * identityCoefficient +
+        pc.factor * state[gl_GlobalInvocationID.x];
+  }
+}

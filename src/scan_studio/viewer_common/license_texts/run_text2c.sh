@@ -1,0 +1,1 @@
+./text2c -o texts base64.txt dav1d.txt droidsans.txt eigen.txt filesystem.txt fontstash.txt gli.txt libavif.txt loguru.txt metalcpp.txt nlohmannjson.txt openxrsdk.txt sdl.txt sophus.txt tinygltf.txt utf8decoder.txt volk.txt vulkangltfpbr.txt vulkanmemoryallocator.txt wasmfeaturedetect.txt zstd.txt

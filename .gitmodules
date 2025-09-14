@@ -1,0 +1,15 @@
+[submodule "third_party/dav1d"]
+	path = third_party/dav1d
+	url = https://github.com/videolan/dav1d.git
+[submodule "third_party/zstd"]
+	path = third_party/zstd
+	url = https://github.com/facebook/zstd.git
+[submodule "third_party/libvis/third_party/eigen"]
+	path = third_party/libvis/third_party/eigen
+	url = https://github.com/scannedreality/eigen.git
+[submodule "third_party/libvis/third_party/filesystem"]
+	path = third_party/libvis/third_party/filesystem
+	url = https://github.com/gulrak/filesystem.git
+[submodule "third_party/libvis/third_party/yaml-cpp"]
+	path = third_party/libvis/third_party/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
